@@ -7,6 +7,12 @@ const MODELS = {
     provider: 'openai',
     endpoint: 'https://api.openai.com/v1/chat/completions',
   },
+  // DeepSeek
+  'deepseek-chat': {
+    provider: 'deepseek',
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+  },
   // 阿里云通义千问
   'qwen-turbo': {
     provider: 'qwen',
@@ -47,10 +53,10 @@ const MODELS = {
   },
 };
 
-// 默认使用通义千问
-const DEFAULT_MODEL = 'qwen-turbo';
+// 默认使用 DeepSeek
+const DEFAULT_MODEL = 'deepseek-chat';
 
-async function callAI(modelName: string, messages: { role: string; content: string | object[] }[]) {
+async function callAI(modelName: string, messages: { role: string; content: string }[]) {
   const model = MODELS[modelName as keyof typeof MODELS] || MODELS[DEFAULT_MODEL];
   const apiKey = process.env[model.apiKeyEnv || 'OPENAI_API_KEY'];
   
@@ -63,14 +69,13 @@ async function callAI(modelName: string, messages: { role: string; content: stri
   };
 
   // 根据不同 provider 设置认证方式
-  if (model.provider === 'openai') {
+  if (model.provider === 'openai' || model.provider === 'deepseek') {
     headers['Authorization'] = `Bearer ${apiKey}`;
   } else if (model.provider === 'qwen') {
     headers['Authorization'] = `Bearer ${apiKey}`;
   } else if (model.provider === 'zhipu') {
     headers['Authorization'] = `Bearer ${apiKey}`;
   } else if (model.provider === 'baidu') {
-    // 百度使用 Basic Auth
     const baiduToken = Buffer.from(`:${apiKey}`).toString('base64');
     headers['Authorization'] = `Basic ${baiduToken}`;
   }
@@ -98,14 +103,15 @@ async function callAI(modelName: string, messages: { role: string; content: stri
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { pdf, filename, question, summary, model } = body;
+    const { text, question, summary, model } = body;
+    const selectedModel = model || DEFAULT_MODEL;
 
     // 追问场景
     if (question && summary) {
       const messages = [
         {
           role: 'system',
-          content: '你是一个 PDF 文档助手，基于给定的摘要内容回答用户问题。如果问题超出摘要范围，请如实告知。',
+          content: '你是一个 PDF 文档助手，基于给定的摘要内容回答用户问题。如果问题超出摘要范围，请如实告知。请用中文回答。',
         },
         {
           role: 'user',
@@ -113,26 +119,31 @@ export async function POST(request: NextRequest) {
         },
       ];
 
-      const answer = await callAI(model || DEFAULT_MODEL, messages);
+      const answer = await callAI(selectedModel, messages);
       return NextResponse.json({ answer });
     }
 
-    // PDF 摘要场景
-    if (!pdf || !filename) {
-      return NextResponse.json({ error: '缺少 PDF 文件' }, { status: 400 });
+    // PDF 摘要场景 - 接收已提取的文本
+    if (!text) {
+      return NextResponse.json({ error: '缺少 PDF 文本内容' }, { status: 400 });
     }
 
-    // 国产模型不支持原生 PDF，需要先用 pdf.js 提取文本
-    // 这里简化处理：假设上传的是已经提取的文本或者需要前端处理
-    
-    // 注意：由于浏览器安全限制，前端无法直接读取 PDF 文本
-    // 这里需要后端处理，但后端在 Edge Runtime 下无法使用 pdf.js
-    // 解决方案：使用支持 PDF 的模型，或者添加 PDF 解析服务
-    
-    // 简化版：返回一个提示
-    return NextResponse.json({
-      summary: `PDF 摘要功能需要配置支持 PDF 的模型。\n\n当前使用模型: ${model || DEFAULT_MODEL}\n\n如需使用 PDF 摘要，请：\n1. 使用支持 PDF 的模型（如 OpenAI o1-mini）\n2. 或配置 PDF 文本提取服务\n\n环境变量配置：\n- 通义千问: DASHSCOPE_API_KEY\n- 智谱 GLM: ZHIPU_API_KEY\n- 百度文心: BAIDU_API_KEY\n- OpenAI: OPENAI_API_KEY`,
-    });
+    // 截取文本避免超出 token 限制
+    const truncatedText = text.slice(0, 15000);
+
+    const messages = [
+      {
+        role: 'system',
+        content: '你是一个专业的文档摘要助手。请仔细阅读用户提供的文档内容，然后生成一个简洁、结构化的摘要。要求：1）用中文输出；2）包含文档的主要主题和目的；3）列出关键内容要点（3-5个）；4）标注文档类型。',
+      },
+      {
+        role: 'user',
+        content: `请为以下文档生成摘要：\n\n${truncatedText}`,
+      },
+    ];
+
+    const aiSummary = await callAI(selectedModel, messages);
+    return NextResponse.json({ summary: aiSummary });
 
   } catch (error) {
     console.error('API Error:', error);

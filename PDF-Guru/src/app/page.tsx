@@ -1,8 +1,12 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
 
-type Status = 'idle' | 'uploading' | 'processing' | 'success' | 'error';
+// 设置 pdf.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+type Status = 'idle' | 'extracting' | 'processing' | 'success' | 'error';
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -11,7 +15,31 @@ export default function Home() {
   const [error, setError] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [question, setQuestion] = useState('');
+  const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 提取 PDF 文本
+  const extractPDFText = async (pdfFile: File): Promise<string> => {
+    const arrayBuffer = await pdfFile.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    
+    let fullText = '';
+    const numPages = pdf.numPages;
+
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      fullText += pageText + '\n\n';
+      
+      // 更新进度
+      setProgress(Math.round((i / numPages) * 100));
+    }
+
+    return fullText;
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -50,27 +78,28 @@ export default function Home() {
   const handleSubmit = async () => {
     if (!file) return;
 
-    setStatus('uploading');
+    setStatus('extracting');
     setError('');
+    setProgress(0);
 
     try {
-      // 读取 PDF 文件为 base64
-      const arrayBuffer = await file.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ''
-        )
-      );
+      // 1. 提取 PDF 文本
+      setStatus('extracting');
+      const text = await extractPDFText(file);
+      
+      if (!text.trim()) {
+        throw new Error('无法从 PDF 中提取文本');
+      }
 
       setStatus('processing');
+      setProgress(100);
 
-      // 调用 API
+      // 2. 调用 API 生成摘要
       const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pdf: base64,
+          text,
           filename: file.name,
         }),
       });
@@ -194,10 +223,17 @@ export default function Home() {
         )}
 
         {/* 状态显示 */}
-        {status === 'uploading' && (
+        {status === 'extracting' && (
           <div className="mt-8 text-center">
             <div className="loading-spinner mx-auto mb-4"></div>
-            <p className="text-gray-600">上传中...</p>
+            <p className="text-gray-600">正在提取 PDF 文本...</p>
+            <div className="mt-2 w-48 mx-auto bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all"
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
+            <p className="text-sm text-gray-400 mt-1">{progress}%</p>
           </div>
         )}
 
