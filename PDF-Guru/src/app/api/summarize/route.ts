@@ -57,11 +57,13 @@ const MODELS = {
 const DEFAULT_MODEL = 'deepseek-chat';
 
 async function callAI(modelName: string, messages: { role: string; content: string }[]) {
-  const model = MODELS[modelName as keyof typeof MODELS] || MODELS[DEFAULT_MODEL];
-  const apiKey = process.env[model.apiKeyEnv || 'OPENAI_API_KEY'];
+  const modelKey = modelName as keyof typeof MODELS;
+  const model = MODELS[modelKey] || MODELS[DEFAULT_MODEL];
+  const apiKeyEnv = (model as any).apiKeyEnv || 'OPENAI_API_KEY';
+  const apiKey = process.env[apiKeyEnv];
   
   if (!apiKey) {
-    throw new Error(`请配置环境变量: ${model.apiKeyEnv || 'OPENAI_API_KEY'}`);
+    throw new Error(`请配置环境变量: ${apiKeyEnv}`);
   }
 
   const headers: Record<string, string> = {

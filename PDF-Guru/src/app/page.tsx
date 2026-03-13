@@ -1,10 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// 设置 pdf.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 type Status = 'idle' | 'extracting' | 'processing' | 'success' | 'error';
 
@@ -17,9 +13,24 @@ export default function Home() {
   const [question, setQuestion] = useState('');
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pdfLibLoaded, setPdfLibLoaded] = useState(false);
+
+  // 动态加载 pdf.js
+  useEffect(() => {
+    import('pdfjs-dist').then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+      (window as any).pdfjsLib = pdfjs;
+      setPdfLibLoaded(true);
+    });
+  }, []);
 
   // 提取 PDF 文本
   const extractPDFText = async (pdfFile: File): Promise<string> => {
+    const pdfjsLib = (window as any).pdfjsLib;
+    if (!pdfjsLib) {
+      throw new Error('PDF 库加载失败，请刷新页面重试');
+    }
+
     const arrayBuffer = await pdfFile.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
@@ -34,7 +45,6 @@ export default function Home() {
         .join(' ');
       fullText += pageText + '\n\n';
       
-      // 更新进度
       setProgress(Math.round((i / numPages) * 100));
     }
 
@@ -211,7 +221,7 @@ export default function Home() {
         </div>
 
         {/* 上传按钮 */}
-        {file && status === 'idle' && (
+        {file && status === 'idle' && pdfLibLoaded && (
           <div className="mt-4 flex justify-center">
             <button
               onClick={handleSubmit}
@@ -219,6 +229,12 @@ export default function Home() {
             >
               生成摘要
             </button>
+          </div>
+        )}
+
+        {!pdfLibLoaded && file && status === 'idle' && (
+          <div className="mt-4 text-center text-gray-500">
+            正在加载 PDF 处理库...
           </div>
         )}
 
@@ -291,7 +307,7 @@ export default function Home() {
                 />
                 <button
                   onClick={handleAskQuestion}
-                  disabled={!question.trim() || status === 'processing'}
+                  disabled={!question.trim() || status !== 'success'}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   发送
