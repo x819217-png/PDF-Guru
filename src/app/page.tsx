@@ -18,7 +18,7 @@ export default function Home() {
   // 动态加载 pdf.js
   useEffect(() => {
     import('pdfjs-dist').then((pdfjs) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+      pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
       (window as any).pdfjsLib = pdfjs;
       setPdfLibLoaded(true);
     });
